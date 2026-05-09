@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Headers, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Logger, Res } from '@nestjs/common';
+import { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { ProxyService } from './proxy.service';
 
@@ -40,14 +41,26 @@ export class ProxyController {
   async messages(
     @Body() body: Anthropic.MessageCreateParamsNonStreaming,
     @Headers() allHeaders: Record<string, string>,
-  ): Promise<Anthropic.Message> {
+    @Res() res: Response,
+  ): Promise<void> {
     const anthropicHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(allHeaders)) {
       if (key.startsWith('anthropic-') || key === 'authorization') {
         anthropicHeaders[key] = value;
       }
     }
-    this.logger.debug(`Request: model=${body.model}, messages=${body.messages?.length}, tools=${(body.tools as unknown[])?.length ?? 0}, headers=${JSON.stringify(Object.keys(anthropicHeaders))}`);
-    return this.proxyService.forwardToAnthropic(body, anthropicHeaders);
+
+    const isStreaming = (body as any).stream === true;
+    this.logger.debug(`Request: model=${body.model}, messages=${body.messages?.length}, tools=${(body.tools as unknown[])?.length ?? 0}, stream=${isStreaming}`);
+
+    if (isStreaming) {
+      // Streaming: pasar transparente sin interceptar (SSE no se puede parsear como JSON)
+      this.logger.debug('Streaming request — forwarding transparently');
+      await this.proxyService.forwardStreaming(body, anthropicHeaders, res);
+      return;
+    }
+
+    const result = await this.proxyService.forwardToAnthropic(body, anthropicHeaders);
+    res.json(result);
   }
 }

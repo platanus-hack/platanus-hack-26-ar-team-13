@@ -107,7 +107,7 @@ export class AnalyzerService {
 
   // Patrones que indican ejecución remota de código o exfiltración
   private static readonly MALICIOUS_PATTERNS: Array<{ pattern: RegExp; label: string; score: number }> = [
-    { pattern: /curl\s+.*\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i,   label: 'curl pipe to shell',          score: 90 },
+{ pattern: /curl\s+.*\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i,   label: 'curl pipe to shell',          score: 90 },
     { pattern: /wget\s+.*\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i,   label: 'wget pipe to shell',          score: 90 },
     { pattern: /curl\s+-sL?\s+https?:\/\//i,                               label: 'silent curl to remote URL',   score: 40 },
     { pattern: /base64\s+-d.*\|\s*(bash|sh|zsh|python\d*)/i,               label: 'base64 decode and execute',   score: 85 },
