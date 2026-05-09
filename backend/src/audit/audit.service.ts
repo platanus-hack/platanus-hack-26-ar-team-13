@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { AuditLog } from './audit-log.entity';
 
 interface AuditEntry {
-  api_key: string;
+  company: string;
   tool_name: string;
   command: string | null;
   verdict: string;
@@ -20,7 +20,7 @@ export class AuditService {
 
   async save(entry: AuditEntry): Promise<void> {
     await this.repo.save({
-      api_key_prefix: entry.api_key.slice(0, 20),
+      company: entry.company,
       tool_name: entry.tool_name,
       command: entry.command,
       verdict: entry.verdict,
