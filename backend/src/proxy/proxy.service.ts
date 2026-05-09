@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnalyzerService } from '../analyzer/analyzer.service';
+import { Verdict } from '../common/types/verdict.enum';
 /**
  * Handles Anthropic API forwarding and tool_use interception.
  *
@@ -83,20 +84,47 @@ export class ProxyService {
       (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
     );
 
-    if (toolUseBlocks.length > 0) {
-      this.logger.log(`Intercepted ${toolUseBlocks.length} tool_use block(s)`);
-      for (const block of toolUseBlocks) {
-        this.logger.log(`  → tool: ${block.name}, input: ${JSON.stringify(block.input)}`);
-        const verdict = await this.analyzerService.analyze({
-          tool_name: block.name,
-          tool_input: block.input as Record<string, unknown>,
-          session_id: 'proxy-session',
-          cwd: process.cwd(),
+    if (toolUseBlocks.length === 0) {
+      return response;
+    }
+
+    this.logger.log(`Intercepted ${toolUseBlocks.length} tool_use block(s)`);
+
+    const mutableContent: Anthropic.ContentBlock[] = [...(response.content ?? [])];
+    let stopReason = response.stop_reason;
+    const warningBlocks: Anthropic.TextBlock[] = [];
+
+    for (const block of toolUseBlocks) {
+      this.logger.log(`  → tool: ${block.name}, input: ${JSON.stringify(block.input)}`);
+      const result = await this.analyzerService.analyze({
+        tool_name: block.name,
+        tool_input: block.input as Record<string, unknown>,
+        session_id: 'proxy-session',
+        cwd: process.cwd(),
+      });
+      this.logger.log(`  ← verdict: ${result.verdict} (score=${result.risk_score})`);
+
+      if (result.verdict === Verdict.WARN) {
+        warningBlocks.push({
+          type: 'text',
+          text: `⚠️ Security warning for tool '${block.name}': ${result.reason} (risk score: ${result.risk_score}/100)`,
         });
-        this.logger.log(`  ← verdict: ${verdict.verdict} (score=${verdict.risk_score})`);
+      } else if (result.verdict === Verdict.BLOCK) {
+        const idx = mutableContent.indexOf(block);
+        if (idx !== -1) {
+          mutableContent[idx] = {
+            type: 'text',
+            text: `🚫 Tool call '${block.name}' was blocked by security policy: ${result.reason} (risk score: ${result.risk_score}/100)`,
+          };
+        }
+        stopReason = 'end_turn';
       }
     }
 
-    return response;
+    return {
+      ...response,
+      content: [...warningBlocks, ...mutableContent],
+      stop_reason: stopReason,
+    };
   }
 }

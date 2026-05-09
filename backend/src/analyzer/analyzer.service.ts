@@ -5,6 +5,7 @@ import { AnalyzeSettingsRequestDto } from '../common/dto/analyze-settings-reques
 import { AnalyzeSettingsResponseDto, DetectedHookThreat } from '../common/dto/analyze-settings-response.dto';
 import { LlmAnalyzerService } from '../llm-analyzer/llm-analyzer.service';
 import { Verdict } from '../common/types/verdict.enum';
+import { DetectedPattern } from '../common/types/detected-pattern';
 
 /**
  * Orchestrates rule-based and LLM-based security analysis.
@@ -32,12 +33,76 @@ export class AnalyzerService {
 
   async analyze(request: ToolCallRequestDto): Promise<AnalyzeResponseDto> {
     this.logger.log(`Analyzing tool: ${request.tool_name}`);
-    return {
-      verdict: Verdict.ALLOW,
-      risk_score: 0,
-      reason: 'Stub - analysis not implemented yet',
-      detected_patterns: [],
-    };
+
+    const input = request.tool_input as any;
+    const textsToCheck: string[] = [];
+
+    if (request.tool_name === 'Bash') {
+      if (input?.command) textsToCheck.push(input.command);
+    } else if (request.tool_name === 'Write') {
+      if (input?.file_path) textsToCheck.push(input.file_path);
+      if (input?.content) textsToCheck.push(input.content);
+    } else if (request.tool_name === 'Edit') {
+      if (input?.file_path) textsToCheck.push(input.file_path);
+      if (input?.new_string) textsToCheck.push(input.new_string);
+    } else {
+      textsToCheck.push(JSON.stringify(request.tool_input));
+    }
+
+    const seen = new Set<string>();
+    const detectedPatterns: DetectedPattern[] = [];
+    let ruleScore = 0;
+
+    for (const text of textsToCheck) {
+      for (const { pattern, label, score } of AnalyzerService.MALICIOUS_PATTERNS) {
+        if (!seen.has(label) && pattern.test(text)) {
+          seen.add(label);
+          detectedPatterns.push({
+            patternId: label.replace(/\s+/g, '_').toLowerCase(),
+            name: label,
+            riskLevel: score >= 80 ? 'CRITICAL' : score >= 60 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW',
+            confidence: 90,
+            context: text.slice(0, 120),
+          });
+          ruleScore = Math.max(ruleScore, score);
+        }
+      }
+    }
+
+    if (detectedPatterns.length > 1) {
+      ruleScore = Math.min(100, ruleScore + detectedPatterns.length * 5);
+    }
+
+    let finalScore = ruleScore;
+
+    // Dual-path: zona ambigua → llamar LLM para análisis semántico
+    if (ruleScore >= 30 && ruleScore < 70) {
+      try {
+        const llmResult = await this.llmAnalyzer.analyzeWithClaude(request);
+        finalScore = Math.round(ruleScore * 0.7 + llmResult.riskScore * 0.3);
+        this.logger.log(`LLM score: ${llmResult.riskScore}, combined: ${finalScore}`);
+        for (const p of llmResult.detectedPatterns) {
+          if (!seen.has(p.name)) {
+            seen.add(p.name);
+            detectedPatterns.push(p);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`LLM analysis failed, using rule score: ${(err as Error).message}`);
+      }
+    }
+
+    let verdict: Verdict;
+    if (finalScore >= 70) verdict = Verdict.BLOCK;
+    else if (finalScore >= 30) verdict = Verdict.WARN;
+    else verdict = Verdict.ALLOW;
+
+    const reason = detectedPatterns.length === 0
+      ? 'No suspicious patterns detected.'
+      : `Detected: ${detectedPatterns.map(p => p.name).join(', ')}.`;
+
+    this.logger.log(`Tool verdict: ${verdict} (score=${finalScore})`);
+    return { verdict, risk_score: finalScore, reason, detected_patterns: detectedPatterns };
   }
 
   // Patrones que indican ejecución remota de código o exfiltración
