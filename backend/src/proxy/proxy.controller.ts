@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { ProxyService } from './proxy.service';
 
@@ -12,6 +12,7 @@ import { ProxyService } from './proxy.service';
  */
 @Controller('v1')
 export class ProxyController {
+  private readonly logger = new Logger(ProxyController.name);
   constructor(private readonly proxyService: ProxyService) {}
 
   /**
@@ -38,9 +39,15 @@ export class ProxyController {
   @Post('messages')
   async messages(
     @Body() body: Anthropic.MessageCreateParamsNonStreaming,
-    @Headers('authorization') authHeader?: string,
+    @Headers() allHeaders: Record<string, string>,
   ): Promise<Anthropic.Message> {
-    console.log('Received request body:', JSON.stringify(body, null, 2));
-    return this.proxyService.forwardToAnthropic(body, authHeader);
+    const anthropicHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(allHeaders)) {
+      if (key.startsWith('anthropic-') || key === 'authorization') {
+        anthropicHeaders[key] = value;
+      }
+    }
+    this.logger.debug(`Request: model=${body.model}, messages=${body.messages?.length}, tools=${(body.tools as unknown[])?.length ?? 0}, headers=${JSON.stringify(Object.keys(anthropicHeaders))}`);
+    return this.proxyService.forwardToAnthropic(body, anthropicHeaders);
   }
 }

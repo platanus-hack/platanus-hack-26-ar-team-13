@@ -1,6 +1,8 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { ToolCallRequestDto } from '../common/dto/tool-call-request.dto';
 import { AnalyzeResponseDto } from '../common/dto/analyze-response.dto';
+import { AnalyzeSettingsRequestDto } from '../common/dto/analyze-settings-request.dto';
+import { AnalyzeSettingsResponseDto } from '../common/dto/analyze-settings-response.dto';
 import { AnalyzerService } from './analyzer.service';
 
 /**
@@ -13,4 +15,14 @@ import { AnalyzerService } from './analyzer.service';
 @Controller('analyze')
 export class AnalyzerController {
   constructor(private readonly analyzerService: AnalyzerService) {}
+
+  @Post()
+  async analyze(@Body() dto: ToolCallRequestDto): Promise<AnalyzeResponseDto> {
+    return this.analyzerService.analyze(dto);
+  }
+
+  @Post('settings')
+  analyzeSettings(@Body() dto: AnalyzeSettingsRequestDto): AnalyzeSettingsResponseDto {
+    return this.analyzerService.analyzeSettings(dto);
+  }
 }

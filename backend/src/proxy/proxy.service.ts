@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnalyzerService } from '../analyzer/analyzer.service';
@@ -21,60 +21,81 @@ import { AnalyzerService } from '../analyzer/analyzer.service';
  */
 @Injectable()
 export class ProxyService {
-  private readonly anthropic: Anthropic;
+  private readonly logger = new Logger(ProxyService.name);
+  private readonly apiKey: string;
+  private readonly upstreamBaseUrl: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly analyzerService: AnalyzerService,
   ) {
-    const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY') ?? '';
-    const baseURL =
+    this.apiKey = this.configService.get<string>('ANTHROPIC_API_KEY') ?? '';
+    this.upstreamBaseUrl =
       this.configService.get<string>('ANTHROPIC_BASE_URL') ??
       'https://api.anthropic.com';
-
-    this.anthropic = new Anthropic({ apiKey, baseURL });
   }
 
-  /**
-   * Forward a CreateMessage request to Anthropic and return an intercepted response.
-   *
-   * Validation:
-   * - `model` must be present (string)
-   * - `messages` must be present (array)
-   * Throws BadRequestException if either is missing.
-   *
-   * If authorizationHeader is provided (format "Bearer <key>"), that key is used
-   * instead of the configured ANTHROPIC_API_KEY for this request.
-   *
-   * Implementation notes:
-   * - Cast body to Anthropic.MessageCreateParamsNonStreaming before calling SDK
-   * - Extract session_id and cwd from body if present (for analysis context)
-   * - Call interceptToolUseBlocks on the response content array
-   *
-   * @throws BadRequestException if model or messages are missing
-   * @throws Error if the Anthropic API call fails
-   */
   async forwardToAnthropic(
     body: Anthropic.MessageCreateParamsNonStreaming,
-    authorizationHeader?: string,
+    incomingHeaders: Record<string, string>,
   ): Promise<Anthropic.Message> {
     if (!body.model || !body.messages) {
       throw new BadRequestException('model and messages are required');
     }
 
-    let client = this.anthropic;
-    if (authorizationHeader?.startsWith('Bearer ')) {
-      const key = authorizationHeader.slice(7);
-      client = new Anthropic({
-        apiKey: key,
-        baseURL: this.configService.get<string>('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com',
-      });
+    const authHeader = incomingHeaders['authorization'];
+    const apiKey = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : this.apiKey;
+
+    // Base headers - override con lo que el cliente envió
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': incomingHeaders['anthropic-version'] ?? '2023-06-01',
+    };
+    // Forward todos los headers anthropic-* (beta, etc.)
+    for (const [key, value] of Object.entries(incomingHeaders)) {
+      if (key.startsWith('anthropic-') && key !== 'anthropic-version') {
+        headers[key] = value;
+      }
     }
 
-    const response = await client.messages.create(body);
+    // Forward raw body via fetch para no perder ningún campo que el SDK no conozca
+    // (ej: context_management, betas, etc. que Claude Code envía)
+    const res = await fetch(`${this.upstreamBaseUrl}/v1/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
 
-    console.log('[ProxyService] Anthropic response:');
-    console.log(JSON.stringify(response, null, 2));
+    if (!res.ok) {
+      const errText = await res.text();
+      this.logger.error(`Upstream error ${res.status}: ${errText}`);
+      throw new Error(`${res.status} ${errText}`);
+    }
+
+    const response = (await res.json()) as Anthropic.Message;
+
+    this.logger.debug(`Response: stop_reason=${response.stop_reason}, content_blocks=${response.content?.length}`);
+
+    const toolUseBlocks = (response.content ?? []).filter(
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+    );
+
+    if (toolUseBlocks.length > 0) {
+      this.logger.log(`Intercepted ${toolUseBlocks.length} tool_use block(s)`);
+      for (const block of toolUseBlocks) {
+        this.logger.log(`  → tool: ${block.name}, input: ${JSON.stringify(block.input)}`);
+        const verdict = await this.analyzerService.analyze({
+          tool_name: block.name,
+          tool_input: block.input as Record<string, unknown>,
+          session_id: 'proxy-session',
+          cwd: process.cwd(),
+        });
+        this.logger.log(`  ← verdict: ${verdict.verdict} (score=${verdict.risk_score})`);
+      }
+    }
 
     return response;
   }
