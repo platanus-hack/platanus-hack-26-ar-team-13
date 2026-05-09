@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnalyzerService } from '../analyzer/analyzer.service';
+import { BashToolInput } from '../common/types/tool-input';
 /**
  * Handles Anthropic API forwarding and tool_use interception.
  *
@@ -56,25 +57,27 @@ export class ProxyService {
    */
   async forwardToAnthropic(
     body: Anthropic.MessageCreateParamsNonStreaming,
-    authorizationHeader?: string,
   ): Promise<Anthropic.Message> {
     if (!body.model || !body.messages) {
       throw new BadRequestException('model and messages are required');
     }
 
-    let client = this.anthropic;
-    if (authorizationHeader?.startsWith('Bearer ')) {
-      const key = authorizationHeader.slice(7);
-      client = new Anthropic({
-        apiKey: key,
-        baseURL: this.configService.get<string>('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com',
-      });
+    // context_management is sent by Claude Code but rejected by older SDK versions
+    const { context_management: _, ...params } = body as unknown as Record<string, unknown>;
+    const response = await this.anthropic.messages.create(
+      params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+    );
+
+    if (!body.tools?.length) {
+      return response;
     }
 
-    const response = await client.messages.create(body);
+    const commands = (response.content ?? [])
+      .filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === 'Bash')
+      .map((b) => (b.input as BashToolInput).command);
 
-    console.log('[ProxyService] Anthropic response:');
-    console.log(JSON.stringify(response, null, 2));
+    console.log('[ProxyService] Terminal commands to analyze:');
+    console.log(JSON.stringify(commands, null, 2));
 
     return response;
   }

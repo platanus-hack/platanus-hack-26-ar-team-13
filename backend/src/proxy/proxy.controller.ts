@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { ProxyService } from './proxy.service';
 
@@ -38,9 +38,7 @@ export class ProxyController {
   @Post('messages')
   async messages(
     @Body() body: Anthropic.MessageCreateParamsNonStreaming,
-    @Headers('authorization') authHeader?: string,
   ): Promise<Anthropic.Message> {
-    console.log('Received request body:', JSON.stringify(body, null, 2));
-    return this.proxyService.forwardToAnthropic(body, authHeader);
+    return this.proxyService.forwardToAnthropic(body);
   }
 }
