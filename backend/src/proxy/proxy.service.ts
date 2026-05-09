@@ -2,22 +2,27 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnalyzerService } from '../analyzer/analyzer.service';
+import { AuditService } from '../audit/audit.service';
 import { Verdict } from '../common/types/verdict.enum';
+import { BashToolInput } from '../common/types/tool-input';
+
 /**
  * Handles Anthropic API forwarding and tool_use interception.
  *
- * Non-streaming approach:
- *   1. Forward request body verbatim to Anthropic (non-streaming)
- *   2. Receive complete Message response
- *   3. Walk content blocks looking for type === 'tool_use'
- *   4. Analyze each tool_use with AnalyzerService
- *   5. ALLOW → keep unchanged
- *      WARN  → prepend a text warning block
- *      BLOCK → replace tool_use with a text explanation block
- *   6. Return modified response to client
+ * Non-streaming workflow:
+ *   1. Validate request has model and messages
+ *   2. Forward body verbatim to Anthropic upstream (non-streaming)
+ *   3. Receive complete Message response
+ *   4. Extract and analyze tool_use blocks with AnalyzerService
+ *   5. Apply verdicts:
+ *      - ALLOW   → keep unchanged
+ *      - WARN    → prepend text warning block
+ *      - BLOCK   → replace tool_use with text explanation, set stop_reason to 'end_turn'
+ *   6. Persist audit log entry per block
+ *   7. Return modified response to client
  *
- * Two Anthropic SDK instances exist in the app:
- * - This service: uses ANTHROPIC_BASE_URL (the real upstream, to avoid proxying ourselves)
+ * Note: Two Anthropic SDK instances exist:
+ * - This service: uses ANTHROPIC_BASE_URL (avoids proxying ourselves)
  * - LlmAnalyzerService: always calls api.anthropic.com
  */
 @Injectable()
@@ -29,6 +34,7 @@ export class ProxyService {
   constructor(
     private readonly configService: ConfigService,
     private readonly analyzerService: AnalyzerService,
+    private readonly auditService: AuditService,
   ) {
     this.apiKey = this.configService.get<string>('ANTHROPIC_API_KEY') ?? '';
     this.upstreamBaseUrl =
@@ -40,34 +46,56 @@ export class ProxyService {
     body: Anthropic.MessageCreateParamsNonStreaming,
     incomingHeaders: Record<string, string>,
   ): Promise<Anthropic.Message> {
+    this.validateRequest(body);
+
+    const apiKey = this.extractApiKey(incomingHeaders);
+    const headers = this.buildHeaders(apiKey, incomingHeaders);
+
+    const response = await this.callUpstream(headers, body);
+    return this.processResponse(response, apiKey);
+  }
+
+  private validateRequest(body: Anthropic.MessageCreateParamsNonStreaming): void {
     if (!body.model || !body.messages) {
       throw new BadRequestException('model and messages are required');
     }
+  }
 
+  private extractApiKey(incomingHeaders: Record<string, string>): string {
     const authHeader = incomingHeaders['authorization'];
-    const apiKey = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : this.apiKey;
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+    return this.apiKey;
+  }
 
-    // Base headers - override con lo que el cliente envió
+  private buildHeaders(
+    apiKey: string,
+    incomingHeaders: Record<string, string>,
+  ): Record<string, string> {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': incomingHeaders['anthropic-version'] ?? '2023-06-01',
     };
-    // Forward todos los headers anthropic-* (beta, etc.)
+
     for (const [key, value] of Object.entries(incomingHeaders)) {
       if (key.startsWith('anthropic-') && key !== 'anthropic-version') {
         headers[key] = value;
       }
     }
 
-    // Forward raw body via fetch para no perder ningún campo que el SDK no conozca
-    // (ej: context_management, betas, etc. que Claude Code envía)
+    return headers;
+  }
+
+  private async callUpstream(
+    headers: Record<string, string>,
+    body: Anthropic.MessageCreateParamsNonStreaming,
+  ): Promise<Anthropic.Message> {
     const res = await fetch(`${this.upstreamBaseUrl}/v1/messages`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, stream: false }),
     });
 
     if (!res.ok) {
@@ -76,55 +104,105 @@ export class ProxyService {
       throw new Error(`${res.status} ${errText}`);
     }
 
-    const response = (await res.json()) as Anthropic.Message;
+    return (await res.json()) as Anthropic.Message;
+  }
 
-    this.logger.debug(`Response: stop_reason=${response.stop_reason}, content_blocks=${response.content?.length}`);
-
-    const toolUseBlocks = (response.content ?? []).filter(
-      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+  private async processResponse(
+    response: Anthropic.Message,
+    apiKey: string,
+  ): Promise<Anthropic.Message> {
+    this.logger.debug(
+      `Response: stop_reason=${response.stop_reason}, content_blocks=${response.content?.length}`,
     );
 
+    const toolUseBlocks = this.extractToolUseBlocks(response);
     if (toolUseBlocks.length === 0) {
       return response;
     }
 
     this.logger.log(`Intercepted ${toolUseBlocks.length} tool_use block(s)`);
 
-    const mutableContent: Anthropic.ContentBlock[] = [...(response.content ?? [])];
-    let stopReason = response.stop_reason;
+    const { mutableContent, warningBlocks, shouldStopEarly } =
+      await this.analyzeAndProcessBlocks(toolUseBlocks, apiKey);
+
+    return {
+      ...response,
+      content: [...warningBlocks, ...mutableContent],
+      stop_reason: shouldStopEarly ? 'end_turn' : response.stop_reason,
+    };
+  }
+
+  private extractToolUseBlocks(response: Anthropic.Message): Anthropic.ToolUseBlock[] {
+    return (response.content ?? []).filter(
+      (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+    );
+  }
+
+  private async analyzeAndProcessBlocks(
+    toolUseBlocks: Anthropic.ToolUseBlock[],
+    apiKey: string,
+  ): Promise<{
+    mutableContent: Anthropic.ContentBlock[];
+    warningBlocks: Anthropic.TextBlock[];
+    shouldStopEarly: boolean;
+  }> {
+    const mutableContent: Anthropic.ContentBlock[] = [];
     const warningBlocks: Anthropic.TextBlock[] = [];
+    let shouldStopEarly = false;
 
     for (const block of toolUseBlocks) {
       this.logger.log(`  → tool: ${block.name}, input: ${JSON.stringify(block.input)}`);
+
       const result = await this.analyzerService.analyze({
         tool_name: block.name,
         tool_input: block.input as Record<string, unknown>,
         session_id: 'proxy-session',
         cwd: process.cwd(),
       });
+
       this.logger.log(`  ← verdict: ${result.verdict} (score=${result.risk_score})`);
 
+      const command =
+        block.name === 'Bash' ? ((block.input as BashToolInput).command ?? null) : null;
+
+      await this.auditService.save({
+        api_key: apiKey,
+        tool_name: block.name,
+        command,
+        verdict: result.verdict,
+        risk_score: result.risk_score,
+      });
+
       if (result.verdict === Verdict.WARN) {
-        warningBlocks.push({
-          type: 'text',
-          text: `⚠️ Security warning for tool '${block.name}': ${result.reason} (risk score: ${result.risk_score}/100)`,
-        });
+        warningBlocks.push(this.createWarningBlock(block.name, result));
       } else if (result.verdict === Verdict.BLOCK) {
-        const idx = mutableContent.indexOf(block);
-        if (idx !== -1) {
-          mutableContent[idx] = {
-            type: 'text',
-            text: `🚫 Tool call '${block.name}' was blocked by security policy: ${result.reason} (risk score: ${result.risk_score}/100)`,
-          };
-        }
-        stopReason = 'end_turn';
+        mutableContent.push(this.createBlockedBlock(block.name, result));
+        shouldStopEarly = true;
+      } else {
+        mutableContent.push(block);
       }
     }
 
+    return { mutableContent, warningBlocks, shouldStopEarly };
+  }
+
+  private createWarningBlock(
+    toolName: string,
+    result: { reason: string; risk_score: number },
+  ): Anthropic.TextBlock {
     return {
-      ...response,
-      content: [...warningBlocks, ...mutableContent],
-      stop_reason: stopReason,
+      type: 'text',
+      text: `⚠️ Security warning for tool '${toolName}': ${result.reason} (risk score: ${result.risk_score}/100)`,
+    };
+  }
+
+  private createBlockedBlock(
+    toolName: string,
+    result: { reason: string; risk_score: number },
+  ): Anthropic.TextBlock {
+    return {
+      type: 'text',
+      text: `🚫 Tool call '${toolName}' was blocked by security policy: ${result.reason} (risk score: ${result.risk_score}/100)`,
     };
   }
 }
