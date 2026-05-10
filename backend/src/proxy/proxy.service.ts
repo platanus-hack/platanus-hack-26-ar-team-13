@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { Response } from 'express';
 import { AnalyzerService } from '../analyzer/analyzer.service';
+import { AnalyzeResponseDto } from '../common/dto/analyze-response.dto';
 import { Verdict } from '../common/types/verdict.enum';
+import { DetectedPattern } from '../common/types/detected-pattern';
 /**
  * Handles Anthropic API forwarding and tool_use interception.
  *
@@ -264,9 +266,9 @@ export class ProxyService {
 
     this.logger.log(`Intercepted ${toolUseBlocks.length} tool_use block(s)`);
 
-    const mutableContent: Anthropic.ContentBlock[] = [...(response.content ?? [])];
-    let stopReason = response.stop_reason;
-    const warningBlocks: Anthropic.TextBlock[] = [];
+    type BlockVerdict = { block: Anthropic.ToolUseBlock; result: AnalyzeResponseDto };
+    const blockVerdicts: BlockVerdict[] = [];
+    let worstVerdict: Verdict = Verdict.ALLOW;
 
     for (const block of toolUseBlocks) {
       this.logger.log(`  → tool: ${block.name}, input: ${JSON.stringify(block.input)}`);
@@ -277,28 +279,41 @@ export class ProxyService {
         cwd: process.cwd(),
       });
       this.logger.log(`  ← verdict: ${result.verdict} (score=${result.risk_score})`);
-
-      if (result.verdict === Verdict.WARN) {
-        warningBlocks.push({
-          type: 'text',
-          text: `⚠️ Security warning for tool '${block.name}': ${result.reason} (risk score: ${result.risk_score}/100)`,
-        });
-      } else if (result.verdict === Verdict.BLOCK) {
-        const idx = mutableContent.indexOf(block);
-        if (idx !== -1) {
-          mutableContent[idx] = {
-            type: 'text',
-            text: `🚫 Tool call '${block.name}' was blocked by security policy: ${result.reason} (risk score: ${result.risk_score}/100)`,
-          };
-        }
-        stopReason = 'end_turn';
-      }
+      blockVerdicts.push({ block, result });
+      if (result.verdict === Verdict.BLOCK) worstVerdict = Verdict.BLOCK;
+      else if (result.verdict === Verdict.WARN && worstVerdict !== Verdict.BLOCK) worstVerdict = Verdict.WARN;
     }
 
-    return {
-      ...response,
-      content: [...warningBlocks, ...mutableContent],
-      stop_reason: stopReason,
-    };
+    if (worstVerdict === Verdict.ALLOW) return response;
+
+    if (worstVerdict === Verdict.BLOCK) {
+      const newContent = (response.content ?? []).map(b => {
+        if (b.type !== 'tool_use') return b;
+        const info = blockVerdicts.find(v => v.block.id === (b as Anthropic.ToolUseBlock).id);
+        const patterns = info?.result.detected_patterns.map((p: DetectedPattern) => p.name).join(', ') || info?.result.reason || '';
+        return {
+          type: 'text' as const,
+          text: `🚫 ACTION BLOCKED: Tool '${b.name}' was blocked by security policy.\nDetected: ${patterns}\nRisk score: ${info?.result.risk_score ?? 0}/100`,
+        };
+      });
+      return { ...response, content: newContent, stop_reason: 'end_turn' as const };
+    }
+
+    // WARN: insert a text block immediately before each flagged tool_use
+    const newContent: Anthropic.ContentBlock[] = [];
+    for (const b of response.content ?? []) {
+      if (b.type === 'tool_use') {
+        const info = blockVerdicts.find(v => v.block.id === (b as Anthropic.ToolUseBlock).id);
+        if (info?.result.verdict === Verdict.WARN) {
+          const patterns = info.result.detected_patterns.map((p: DetectedPattern) => p.name).join(', ') || info.result.reason;
+          newContent.push({
+            type: 'text',
+            text: `⚠️ SECURITY WARNING: Tool '${b.name}' flagged.\nDetected: ${patterns}\nRisk score: ${info.result.risk_score}/100\nThe action will still execute — review it carefully.`,
+          });
+        }
+      }
+      newContent.push(b);
+    }
+    return { ...response, content: newContent };
   }
 }

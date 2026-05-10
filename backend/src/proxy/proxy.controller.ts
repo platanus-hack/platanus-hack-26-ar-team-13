@@ -54,7 +54,6 @@ export class ProxyController {
     this.logger.debug(`Request: model=${body.model}, messages=${body.messages?.length}, tools=${(body.tools as unknown[])?.length ?? 0}, stream=${isStreaming}`);
 
     if (isStreaming) {
-      // Streaming: pasar transparente sin interceptar (SSE no se puede parsear como JSON)
       this.logger.debug('Streaming request — forwarding transparently');
       await this.proxyService.forwardStreaming(body, anthropicHeaders, res);
       return;
