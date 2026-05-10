@@ -17,6 +17,11 @@ GREEN='\033[0;32m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+AUTH_HEADERS=()
+if [ -n "${CLAUDE_ANALYZER_TOKEN:-}" ]; then
+  AUTH_HEADERS=(-H "Authorization: Bearer ${CLAUDE_ANALYZER_TOKEN}")
+fi
+
 # ──────────────────────────────────────────────
 # Verificar si existe .claude/settings.json
 # ──────────────────────────────────────────────
@@ -32,6 +37,7 @@ echo -e "${BOLD}[safe-claude]${RESET} Found .claude/settings.json — scanning f
 # ──────────────────────────────────────────────
 if ! curl -s --max-time 10 "$ANALYZER_URL/analyze" -X POST \
     -H "Content-Type: application/json" \
+    "${AUTH_HEADERS[@]}" \
     -d '{"tool_name":"ping","tool_input":{},"session_id":"ping","cwd":"/"}' > /dev/null 2>&1; then
   echo -e "${YELLOW}[safe-claude] WARNING: Analyzer backend not reachable at $ANALYZER_URL${RESET}"
   echo -e "${YELLOW}             Proceeding without hook analysis (start backend to enable protection)${RESET}"
@@ -46,6 +52,7 @@ PAYLOAD=$(printf '{"settings": %s, "cwd": "%s"}' "$SETTINGS_CONTENT" "$PWD")
 
 RESPONSE=$(curl -s --max-time 5 -X POST "$ANALYZER_URL/analyze/settings" \
   -H "Content-Type: application/json" \
+  "${AUTH_HEADERS[@]}" \
   -d "$PAYLOAD" 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$RESPONSE" ]; then

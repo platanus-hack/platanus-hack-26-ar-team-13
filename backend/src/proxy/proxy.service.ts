@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { Response } from 'express';
@@ -50,8 +50,7 @@ export class ProxyService {
     incomingHeaders: Record<string, string>,
     res: Response,
   ): Promise<void> {
-    const authHeader = incomingHeaders['authorization'];
-    const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : this.apiKey;
+    const apiKey = this.extractApiKey(incomingHeaders);
 
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -240,9 +239,15 @@ export class ProxyService {
   private extractApiKey(incomingHeaders: Record<string, string>): string {
     const authHeader = incomingHeaders['authorization'];
     if (authHeader?.startsWith('Bearer ')) {
-      return authHeader.slice(7);
+      const key = authHeader.slice(7).trim();
+      if (key) return key;
     }
-    return this.apiKey;
+
+    if (this.configService.get<string>('ALLOW_SERVER_API_KEY_PROXY') === 'true' && this.apiKey) {
+      return this.apiKey;
+    }
+
+    throw new UnauthorizedException('Authorization: Bearer <Anthropic API key> is required');
   }
 
   private buildHeaders(
