@@ -61,7 +61,7 @@ export default function Dashboard() {
               Hackan<span className="text-[#00D17A]">&apos;</span>t
             </h1>
             <p className="text-sm text-white/50">
-              Claude Code tool usage monitoring
+              Monitor your AI tools in real-time
             </p>
           </div>
           <div className="text-xs text-white/50 text-right">
