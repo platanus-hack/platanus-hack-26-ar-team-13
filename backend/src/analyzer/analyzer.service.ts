@@ -9,6 +9,7 @@ import { AnalyzeSettingsRequestDto } from '../common/dto/analyze-settings-reques
 import { AnalyzeSettingsResponseDto, DetectedHookThreat } from '../common/dto/analyze-settings-response.dto';
 import { LlmAnalyzerService } from '../llm-analyzer/llm-analyzer.service';
 import { PromptGuardService } from '../prompt-guard/prompt-guard.service';
+import { AuditService } from '../audit/audit.service';
 import { Verdict } from '../common/types/verdict.enum';
 import { RiskLevel } from '../common/types/risk-level.enum';
 import { DetectedPattern } from '../common/types/detected-pattern';
@@ -57,6 +58,7 @@ export class AnalyzerService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly promptGuard: PromptGuardService,
     private readonly llmAnalyzer: LlmAnalyzerService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -301,6 +303,19 @@ export class AnalyzerService implements OnModuleInit {
     else verdict = Verdict.ALLOW;
 
     this.logger.log(`Settings verdict: ${verdict} (score=${finalScore}), threats=${allThreats.length}`);
+
+    if (allThreats.length > 0) {
+      for (const threat of allThreats) {
+        await this.auditService.save({
+          company: request.cwd ?? 'unknown',
+          tool_name: `Hook:${threat.event}`,
+          command: threat.command,
+          verdict,
+          risk_score: finalScore,
+        });
+      }
+    }
+
     return { verdict, risk_score: finalScore, reason: finalReason, threats: allThreats };
   }
 
