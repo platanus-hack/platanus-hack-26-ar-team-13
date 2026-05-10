@@ -1,21 +1,40 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import { Response } from 'express';
 
-const ANALYZER_URL = 'https://hackant.vercel.app';
+const ANALYZER_URL = 'https://platanus-hack-26-ar-team-13-production.up.railway.app';
 
 const SAFE_CLAUDE_SCRIPT = `#!/bin/bash
-# safe-claude — wrapper de Claude Code que escanea .claude/settings.json
-# antes de lanzar claude para detectar hooks maliciosos.
+# safe-claude — wrapper for Claude Code that scans .claude/settings.json
+# before launching claude to detect malicious hooks, and proxies all
+# Anthropic API calls through the security backend.
+#
+# Requires: SAFE_CLAUDE_API_KEY environment variable (get one at ${ANALYZER_URL}/auth/register)
 
 ANALYZER_URL="\${CLAUDE_ANALYZER_URL:-${ANALYZER_URL}}"
 REAL_CLAUDE="\${REAL_CLAUDE_PATH:-\$(which claude 2>/dev/null || echo '')}"
 SETTINGS_FILE=".claude/settings.json"
+API_KEY="\${SAFE_CLAUDE_API_KEY:-}"
 
 RED='\\033[0;31m'
 YELLOW='\\033[1;33m'
 GREEN='\\033[0;32m'
 BOLD='\\033[1m'
 RESET='\\033[0m'
+
+if [ -z "$API_KEY" ]; then
+  echo -e "\${RED}[safe-claude] ERROR: SAFE_CLAUDE_API_KEY is not set.\${RESET}"
+  echo ""
+  echo "Get your free API key:"
+  echo "  curl -s -X POST $ANALYZER_URL/auth/register \\\\"
+  echo "    -H 'Content-Type: application/json' \\\\"
+  echo "    -d '{\"clientName\": \"your-name\"}'"
+  echo ""
+  echo "Then add to your shell profile:"
+  echo "  export SAFE_CLAUDE_API_KEY=sk-hackant-..."
+  exit 1
+fi
+
+AUTH_HEADER="Authorization: Bearer $API_KEY"
 
 if [ ! -f "$SETTINGS_FILE" ]; then
   exec env ANTHROPIC_BASE_URL="$ANALYZER_URL" "$REAL_CLAUDE" "$@"
@@ -28,6 +47,7 @@ PAYLOAD=\$(printf '{"settings": %s, "cwd": "%s"}' "$SETTINGS_CONTENT" "$PWD")
 
 RESPONSE=\$(curl -s --max-time 15 -X POST "$ANALYZER_URL/analyze/settings" \\
   -H "Content-Type: application/json" \\
+  -H "$AUTH_HEADER" \\
   -d "$PAYLOAD" 2>/dev/null)
 
 if [ \$? -ne 0 ] || [ -z "$RESPONSE" ]; then
@@ -124,11 +144,11 @@ RESET='\\033[0m'
 echo ""
 echo -e "\${BOLD}╔══════════════════════════════════════════════════════╗\${RESET}"
 echo -e "\${BOLD}║          safe-claude installer                       ║\${RESET}"
-echo -e "\${BOLD}║          Powered by hackant.vercel.app               ║\${RESET}"
+echo -e "\${BOLD}║  Powered by platanus-hack-26-ar-team-13              ║\${RESET}"
 echo -e "\${BOLD}╚══════════════════════════════════════════════════════╝\${RESET}"
 echo ""
 
-# Detectar rc file
+# Detect shell rc file
 if [ "\$SHELL" = "/bin/zsh" ] || [ "\$SHELL" = "/usr/bin/zsh" ]; then
   RC_FILE="$HOME/.zshrc"
 elif [ "\$SHELL" = "/bin/bash" ] || [ "\$SHELL" = "/usr/bin/bash" ]; then
@@ -154,14 +174,48 @@ if [ "\$1" = "--uninstall" ]; then
   exit 0
 fi
 
-# Descargar safe-claude.sh
+# Step 1: Register and get API key
+echo -e "\${BOLD}Step 1: Get your API key\${RESET}"
+echo ""
+echo -e "You need a free API key to use safe-claude."
+echo -n "Enter your name or team name: "
+read -r CLIENT_NAME
+
+if [ -z "$CLIENT_NAME" ]; then
+  CLIENT_NAME="user-\$(date +%s)"
+fi
+
+echo ""
+echo -e "Registering \\"$CLIENT_NAME\\" with the security backend..."
+REGISTER_RESPONSE=\$(curl -s -X POST "$ANALYZER_URL/auth/register" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"clientName\\": \\"$CLIENT_NAME\\"}" 2>/dev/null)
+
+API_KEY=\$(echo "$REGISTER_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('apiKey',''))" 2>/dev/null)
+
+if [ -z "$API_KEY" ]; then
+  echo -e "\${RED}Failed to register. Check your internet connection and try again.\${RESET}"
+  echo "Response: $REGISTER_RESPONSE"
+  exit 1
+fi
+
+echo -e "\${GREEN}✓ API key created!\${RESET}"
+echo ""
+echo -e "\${BOLD}Your API key:\${RESET} $API_KEY"
+echo ""
+echo -e "\${YELLOW}⚠  Save this key — it will not be shown again.\${RESET}"
+echo ""
+
+# Step 2: Download safe-claude.sh
+echo -e "\${BOLD}Step 2: Installing safe-claude\${RESET}"
 mkdir -p "$INSTALL_DIR"
 echo -e "Downloading safe-claude..."
 curl -fsSL "$ANALYZER_URL/safe-claude.sh" -o "$SAFE_CLAUDE_PATH"
 chmod +x "$SAFE_CLAUDE_PATH"
 
-# Agregar alias al rc file
+# Step 3: Add alias and API key export to rc file
 echo "" >> "$RC_FILE"
+echo "export SAFE_CLAUDE_API_KEY='$API_KEY' $MARKER" >> "$RC_FILE"
 echo "alias claude='bash $SAFE_CLAUDE_PATH' $MARKER" >> "$RC_FILE"
 
 echo ""
@@ -173,6 +227,7 @@ echo ""
 echo -e "From now on, every time you run \${BOLD}claude\${RESET} in a project:"
 echo -e "  • Malicious hooks in .claude/settings.json will be blocked"
 echo -e "  • Dangerous tool calls will be intercepted before execution"
+echo -e "  • All requests are authenticated with your personal API key"
 echo ""
 echo -e "To uninstall: \${BOLD}curl -fsSL $ANALYZER_URL/install | bash -s -- --uninstall\${RESET}"
 `;
