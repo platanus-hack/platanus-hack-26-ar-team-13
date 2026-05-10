@@ -158,9 +158,23 @@ export class ProxyService {
       const v = verdicts.get(idx)!;
       const tool = toolUseMap.get(idx)!;
       // Insertar un content_block_start de tipo text con el warning
-      warnEvents.push(
-        `event: content_block_start\ndata: {"type":"content_block_start","index":9${idx},"content_block":{"type":"text","text":""}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":9${idx},"delta":{"type":"text_delta","text":"⚠️ Security warning for '${tool.name}': ${v.reason} (score: ${v.score}/100)"}}\n\nevent: content_block_stop\ndata: {"type":"content_block_stop","index":9${idx}}`
-      );
+      const warningText = `⚠️ Security warning for '${tool.name}': ${v.reason} (score: ${v.score}/100)`;
+      warnEvents.push([
+        this.sseEvent('content_block_start', {
+          type: 'content_block_start',
+          index: Number(`9${idx}`),
+          content_block: { type: 'text', text: '' },
+        }),
+        this.sseEvent('content_block_delta', {
+          type: 'content_block_delta',
+          index: Number(`9${idx}`),
+          delta: { type: 'text_delta', text: warningText },
+        }),
+        this.sseEvent('content_block_stop', {
+          type: 'content_block_stop',
+          index: Number(`9${idx}`),
+        }),
+      ].join('\n\n'));
     }
 
     const modifiedEvents: string[] = [];
@@ -176,12 +190,17 @@ export class ProxyService {
         if (eventType === 'content_block_start') {
           const v = verdicts.get(idx)!;
           const tool = toolUseMap.get(idx)!;
-          modifiedEvents.push(
-            `event: content_block_start\ndata: {"type":"content_block_start","index":${idx},"content_block":{"type":"text","text":""}}`
-          );
-          modifiedEvents.push(
-            `event: content_block_delta\ndata: {"type":"content_block_delta","index":${idx},"delta":{"type":"text_delta","text":"🚫 Tool '${tool.name}' blocked: ${v.reason} (score: ${v.score}/100)"}}`
-          );
+          const blockedText = `🚫 Tool '${tool.name}' blocked: ${v.reason} (score: ${v.score}/100)`;
+          modifiedEvents.push(this.sseEvent('content_block_start', {
+            type: 'content_block_start',
+            index: idx,
+            content_block: { type: 'text', text: '' },
+          }));
+          modifiedEvents.push(this.sseEvent('content_block_delta', {
+            type: 'content_block_delta',
+            index: idx,
+            delta: { type: 'text_delta', text: blockedText },
+          }));
           textBlockIdx = idx;
         } else if (eventType === 'content_block_delta' || (eventType === 'content_block_stop' && idx === textBlockIdx)) {
           // Suprimir los deltas originales del tool_use bloqueado (ya los reemplazamos)
@@ -215,6 +234,10 @@ export class ProxyService {
     res.status(upstream.status);
     res.write(body);
     res.end();
+  }
+
+  private sseEvent(eventType: string, data: unknown): string {
+    return `event: ${eventType}\ndata: ${JSON.stringify(data)}`;
   }
 
   async forwardToAnthropic(
