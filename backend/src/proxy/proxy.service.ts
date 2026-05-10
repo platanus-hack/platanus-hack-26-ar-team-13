@@ -166,7 +166,7 @@ export class ProxyService {
         block.name === 'Bash' ? ((block.input as BashToolInput).command ?? null) : null;
 
       await this.auditService.save({
-        company: "test company",
+        company: "Hackan't",
         tool_name: block.name,
         command,
         verdict: result.verdict,
