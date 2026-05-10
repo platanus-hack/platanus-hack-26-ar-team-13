@@ -6,7 +6,7 @@
   },
   "deploy": {
     "startCommand": "node dist/main",
-    "healthcheckPath": "/",
+    "healthcheckPath": "/install",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
