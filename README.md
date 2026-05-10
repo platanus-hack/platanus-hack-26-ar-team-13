@@ -1,6 +1,6 @@
 # Hackan't — Real-time protection for Claude Code against malicious repos
 
-<img src="./project-logo.svg" alt="Hackan't Logo" width="200" />
+<img src="./project-logo.png" alt="Hackan't Logo" width="200" />
 
 **Track:** AI Security | **Team:** team-13 (Buenos Aires)
 
