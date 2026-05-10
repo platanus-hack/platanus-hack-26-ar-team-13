@@ -17,7 +17,7 @@ import { AuditLog } from './audit/audit-log.entity';
     }),
     TypeOrmModule.forRoot({
       type: 'better-sqlite3',
-      database: 'audit.db',
+      database: process.env.DB_PATH ?? 'audit.db',
       entities: [AuditLog],
       synchronize: true,
     }),
