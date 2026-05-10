@@ -1,17 +1,21 @@
-# team-13 Platanus Hack 26: Buenos Aires Project
+# Hackan't — Real-time protection for Claude Code against malicious repos
 
-**Current project logo:** project-logo.png
+<img src="./project-logo.svg" alt="Hackan't Logo" width="200" />
 
-<img src="./project-logo.png" alt="Project Logo" width="200" />
-
-Track: 🛡️ AI Security
-
-team-13
+**Track:** AI Security | **Team:** team-13 (Buenos Aires)
 
 - Tomas Ignacio Emanuel ([@tomasemanuel](https://github.com/tomasemanuel))
 - Rocio Platini ([@rplatini](https://github.com/rplatini))
 - Julieta Zimmerman ([@Julizimmerman](https://github.com/Julizimmerman))
 - Magali Burstein ([@Magaliburstein](https://github.com/Magaliburstein))
+
+---
+
+## Overview
+
+Claude Code trusts the projects it opens. A malicious repo can manipulate the model via prompt injection to execute dangerous commands through its tools (Bash, Write, Edit) — and the user has no visibility into these attacks until after they happen.
+
+Hackan't adds a real-time defense layer without changing the user's workflow: an **analysis proxy** that sits between Claude Code and `api.anthropic.com`. Claude Code points to the local IP where the client is running instead of the upstream API. The proxy intercepts every tool call the model attempts to execute, analyzes it, and either allows, warns, or blocks it before handing it back to the agent.
 
 ---
 
