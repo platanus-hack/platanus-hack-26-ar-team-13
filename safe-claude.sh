@@ -7,7 +7,7 @@
 #   sudo cp safe-claude.sh /usr/local/bin/safe-claude
 #   alias claude='safe-claude'   # agregar a ~/.zshrc o ~/.bashrc
 
-ANALYZER_URL="${CLAUDE_ANALYZER_URL:-https://hackant.vercel.app}"
+ANALYZER_URL="${CLAUDE_ANALYZER_URL:-https://platanus-hack-26-ar-team-13-production.up.railway.app}"
 REAL_CLAUDE="${REAL_CLAUDE_PATH:-$(which claude 2>/dev/null || echo '')}"
 SETTINGS_FILE=".claude/settings.json"
 
