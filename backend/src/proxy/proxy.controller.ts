@@ -1,7 +1,8 @@
-import { Controller, Post, Body, Headers, Logger, Res } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Logger, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { ProxyService } from './proxy.service';
+import { ApiKeyGuard } from '../auth/api-key.guard';
 
 /**
  * Exposes POST /v1/messages — a drop-in replacement for the Anthropic API.
@@ -10,7 +11,10 @@ import { ProxyService } from './proxy.service';
  * The Anthropic SDK then sends all requests through this proxy.
  *
  * Non-streaming only (hackathon scope). Clients must not set stream: true.
+ *
+ * All routes require a valid API key via: Authorization: Bearer <api-key>
  */
+@UseGuards(ApiKeyGuard)
 @Controller('v1')
 export class ProxyController {
   private readonly logger = new Logger(ProxyController.name);

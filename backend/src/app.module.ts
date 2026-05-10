@@ -8,6 +8,8 @@ import { ProxyModule } from './proxy/proxy.module';
 import { AuditModule } from './audit/audit.module';
 import { AuditLog } from './audit/audit-log.entity';
 import { InstallModule } from './install/install.module';
+import { AuthModule } from './auth/auth.module';
+import { ApiClient } from './auth/api-client.entity';
 
 @Module({
   imports: [
@@ -19,7 +21,7 @@ import { InstallModule } from './install/install.module';
     TypeOrmModule.forRoot({
       type: 'better-sqlite3',
       database: process.env.DB_PATH ?? 'audit.db',
-      entities: [AuditLog],
+      entities: [AuditLog, ApiClient],
       synchronize: true,
     }),
     LlmAnalyzerModule,
@@ -27,6 +29,7 @@ import { InstallModule } from './install/install.module';
     ProxyModule,
     AuditModule,
     InstallModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
