@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  app.enableCors();
   app.use(json({ limit: '50mb' }));
 
   app.useGlobalPipes(
