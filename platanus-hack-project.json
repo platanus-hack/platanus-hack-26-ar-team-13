@@ -1,5 +1,6 @@
 {
-  "project-name": "<FILL THIS>",
-  "project-oneliner-spanish": "<FILL THIS>",
-  "project-description-spanish": "<FILL THIS>"
+  "project-name": "Hackan't",
+  "project-oneliner-spanish": "Protege a Claude Code de repos maliciosos que intentan ejecutar código arbitrario mediante hooks y tool calls comprometidos.",
+  "project-description-spanish": "Hackan't es un sistema de seguridad que actúa como guardia entre el usuario y Claude Code. Detecta hooks maliciosos en la configuración del proyecto antes de que se ejecuten y analiza en tiempo real los tool calls que Claude intenta correr. Usa un motor de reglas con 15 patrones de riesgo combinado con análisis semántico impulsado por IA para razonar sobre la intención real de cada comando en los casos ambiguos. El resultado es un veredicto ALLOW / WARN / BLOCK que protege al usuario sin interrumpir su flujo de trabajo normal.",
+  "deploy-url": "https://platanus-hack-26-ar-team-13-production.up.railway.app"
 }
