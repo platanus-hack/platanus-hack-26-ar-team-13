@@ -1,7 +1,7 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import { Response } from 'express';
 
-const ANALYZER_URL = 'https://hackant.vercel.app';
+const ANALYZER_URL = 'https://platanus-hack-26-ar-team-13-production.up.railway.app';
 
 const SAFE_CLAUDE_SCRIPT = `#!/bin/bash
 # safe-claude — wrapper de Claude Code que escanea .claude/settings.json
