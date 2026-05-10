@@ -22,7 +22,7 @@ export class AnalyzerController {
   }
 
   @Post('settings')
-  analyzeSettings(@Body() dto: AnalyzeSettingsRequestDto): AnalyzeSettingsResponseDto {
+  async analyzeSettings(@Body() dto: AnalyzeSettingsRequestDto): Promise<AnalyzeSettingsResponseDto> {
     return this.analyzerService.analyzeSettings(dto);
   }
 }

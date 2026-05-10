@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Headers, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Logger, Res } from '@nestjs/common';
+import { Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { ProxyService } from './proxy.service';
 
@@ -35,16 +36,25 @@ export class ProxyController {
   async messages(
     @Body() body: Anthropic.MessageCreateParamsNonStreaming,
     @Headers() allHeaders: Record<string, string>,
-  ): Promise<Anthropic.Message> {
-    this.logIncomingRequest(body);
-    return this.proxyService.forwardToAnthropic(body, allHeaders);
-  }
+    @Res() res: Response,
+  ): Promise<void> {
+    const anthropicHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(allHeaders)) {
+      if (key.startsWith('anthropic-') || key === 'authorization') {
+        anthropicHeaders[key] = value;
+      }
+    }
 
-  private logIncomingRequest(body: Anthropic.MessageCreateParamsNonStreaming): void {
-    const messageCount = body.messages?.length ?? 0;
-    const toolCount = (body.tools as unknown[])?.length ?? 0;
-    this.logger.debug(
-      `Request: model=${body.model}, messages=${messageCount}, tools=${toolCount}`,
-    );
+    const isStreaming = (body as any).stream === true;
+    this.logger.debug(`Request: model=${body.model}, messages=${body.messages?.length}, tools=${(body.tools as unknown[])?.length ?? 0}, stream=${isStreaming}`);
+
+    if (isStreaming) {
+      this.logger.debug('Streaming request — forwarding transparently');
+      await this.proxyService.forwardStreaming(body, anthropicHeaders, res);
+      return;
+    }
+
+    const result = await this.proxyService.forwardToAnthropic(body, anthropicHeaders);
+    res.json(result);
   }
 }

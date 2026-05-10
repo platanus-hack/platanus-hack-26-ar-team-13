@@ -7,6 +7,7 @@ import { AnalyzerModule } from './analyzer/analyzer.module';
 import { ProxyModule } from './proxy/proxy.module';
 import { AuditModule } from './audit/audit.module';
 import { AuditLog } from './audit/audit-log.entity';
+import { InstallModule } from './install/install.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AuditLog } from './audit/audit-log.entity';
     AnalyzerModule,
     ProxyModule,
     AuditModule,
+    InstallModule,
   ],
 })
 export class AppModule {}
