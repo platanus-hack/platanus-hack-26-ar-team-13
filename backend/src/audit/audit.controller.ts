@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Headers,
+  Post,
+  Query,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditService, CompanyStat } from './audit.service';
 import { AuditLog } from './audit-log.entity';
 import { IsOptional, IsString, IsInt, Min } from 'class-validator';
@@ -28,22 +37,33 @@ class AuditQueryDto {
 
 @Controller('audit')
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get()
   findAll(
     @Query() query: AuditQueryDto,
+    @Headers() headers: Record<string, string | undefined>,
   ): Promise<{ data: AuditLog[]; total: number }> {
+    this.assertAuthorized(headers);
     return this.auditService.findAll(query);
   }
 
   @Get('stats')
-  getStats(): Promise<CompanyStat[]> {
+  getStats(
+    @Headers() headers: Record<string, string | undefined>,
+  ): Promise<CompanyStat[]> {
+    this.assertAuthorized(headers);
     return this.auditService.getStats();
   }
 
   @Post('seed')
-  async seed(): Promise<{ inserted: number }> {
+  async seed(
+    @Headers() headers: Record<string, string | undefined>,
+  ): Promise<{ inserted: number }> {
+    this.assertAuthorized(headers);
     const entries = [
       // Stripe — equipo de pagos, mayormente limpio con un incidente grave
       { company: "Stripe", tool_name: "Bash", command: "git log --oneline -20", verdict: "allow", risk_score: 0 },
@@ -118,5 +138,23 @@ export class AuditController {
       await this.auditService.save(entry);
     }
     return { inserted: entries.length };
+  }
+
+  private assertAuthorized(headers: Record<string, string | undefined>): void {
+    const expected = this.configService.get<string>('AUDIT_AUTH_TOKEN') ?? '';
+
+    if (!expected) {
+      if (this.configService.get<string>('ALLOW_PUBLIC_AUDIT_DASHBOARD') === 'true') {
+        return;
+      }
+
+      throw new ServiceUnavailableException('AUDIT_AUTH_TOKEN is required');
+    }
+
+    const authHeader = headers['authorization'];
+    const token = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+    if (token !== expected) {
+      throw new UnauthorizedException('Invalid audit token');
+    }
   }
 }

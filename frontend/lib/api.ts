@@ -1,4 +1,4 @@
-const API = "http://localhost:3000";
+const API = "/api";
 
 export interface AuditLog {
   id: number;
