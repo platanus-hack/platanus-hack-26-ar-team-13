@@ -181,8 +181,11 @@ export class AnalyzerService implements OnModuleInit {
       if (needsLlm) {
         try {
           const llmResult = await this.llmAnalyzer.analyzeWithClaude(request);
-          // LLM tiene más peso (0.6) porque entiende el contexto semántico real del comando
-          finalScore = Math.round(finalScore * 0.4 + llmResult.riskScore * 0.6);
+          // Si regex no aportó score (ruleScore=0), el LLM es el único árbitro — usamos su score directo.
+          // Si regex sí aportó, el LLM modera con peso 0.6 (puede bajar falsos positivos de regex).
+          finalScore = ruleScore === 0
+            ? llmResult.riskScore
+            : Math.round(ruleScore * 0.4 + llmResult.riskScore * 0.6);
           this.logger.log(`LlmAnalyzer score: ${llmResult.riskScore}, combined: ${finalScore}`);
           for (const p of llmResult.detectedPatterns) {
             if (!seen.has(p.name)) {
@@ -211,23 +214,23 @@ export class AnalyzerService implements OnModuleInit {
 
   private static readonly MALICIOUS_PATTERNS: Array<{ pattern: RegExp; label: string; score: number }> = [
     // Ejecución remota directa — inequívoco, sin contexto que lo justifique
-    // { pattern: /curl\s+.*\|\s*(bash|sh|zsh|ash|python\d*|node|perl|ruby)/i, label: 'curl pipe to shell',       score: 90 },
-    // { pattern: /wget\s+.*\|\s*(bash|sh|zsh|ash|python\d*|node|perl|ruby)/i, label: 'wget pipe to shell',       score: 90 },
-    // { pattern: /base64\s+-d.*\|\s*(bash|sh|zsh|python\d*)/i,                label: 'base64 decode and execute', score: 85 },
+    { pattern: /curl\s+.*\|\s*(bash|sh|zsh|ash|python\d*|node|perl|ruby)/i, label: 'curl pipe to shell',       score: 90 },
+    { pattern: /wget\s+.*\|\s*(bash|sh|zsh|ash|python\d*|node|perl|ruby)/i, label: 'wget pipe to shell',       score: 90 },
+    { pattern: /base64\s+-d.*\|\s*(bash|sh|zsh|python\d*)/i,                label: 'base64 decode and execute', score: 85 },
 
     // Acceso a credenciales — WARN para que el LLM distinga lectura legítima de exfiltración
-    // { pattern: /~\/\.ssh\//i,                                                label: 'SSH directory access',      score: 65 },
-    // { pattern: /~\/\.aws\//i,                                                label: 'AWS credentials access',    score: 65 },
+    { pattern: /~\/\.ssh\//i,                                                label: 'SSH directory access',      score: 65 },
+    { pattern: /~\/\.aws\//i,                                                label: 'AWS credentials access',    score: 65 },
 
     // Archivos ocultos en /tmp con extensión ejecutable — patrón de payload dropper
-    // { pattern: /\/tmp\/\.[a-z0-9]+\.(py|sh|rb|js)/i,                        label: 'hidden temp executable',    score: 75 },
+    { pattern: /\/tmp\/\.[a-z0-9]+\.(py|sh|rb|js)/i,                        label: 'hidden temp executable',    score: 75 },
 
     // Keychain macOS — comando muy específico, solo tiene sentido malicioso
-    // { pattern: /security\s+(unlock-keychain|dump-keychain)/i,                label: 'macOS keychain dump',       score: 95 },
+    { pattern: /security\s+(unlock-keychain|dump-keychain)/i,                label: 'macOS keychain dump',       score: 95 },
 
     // Tunneling — WARN (55) para que el LLM evalúe el contexto completo
-    // { pattern: /trycloudflare\.com|ngrok\.io|serveo\.net/i,                  label: 'tunneling service domain',  score: 55 },
-    // { pattern: /\bngrok\s+(http|tcp|tls|start)\b/i,                          label: 'ngrok tunnel command',      score: 55 },
+    { pattern: /trycloudflare\.com|ngrok\.io|serveo\.net/i,                  label: 'tunneling service domain',  score: 55 },
+    { pattern: /\bngrok\s+(http|tcp|tls|start)\b/i,                          label: 'ngrok tunnel command',      score: 55 },
   ];
 
   async analyzeSettings(request: AnalyzeSettingsRequestDto): Promise<AnalyzeSettingsResponseDto> {
