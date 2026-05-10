@@ -105,23 +105,27 @@ export class AnalyzerService {
     return { verdict, risk_score: finalScore, reason, detected_patterns: detectedPatterns };
   }
 
-  // Patrones que indican ejecución remota de código o exfiltración
   private static readonly MALICIOUS_PATTERNS: Array<{ pattern: RegExp; label: string; score: number }> = [
-{ pattern: /curl\s+.*\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i,   label: 'curl pipe to shell',          score: 90 },
-    { pattern: /wget\s+.*\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i,   label: 'wget pipe to shell',          score: 90 },
-    { pattern: /curl\s+-sL?\s+https?:\/\//i,                               label: 'silent curl to remote URL',   score: 40 },
-    { pattern: /base64\s+-d.*\|\s*(bash|sh|zsh|python\d*)/i,               label: 'base64 decode and execute',   score: 85 },
-    { pattern: /eval\s*\(/i,                                                label: 'eval execution',              score: 70 },
-    { pattern: /nohup\s+.*&/i,                                             label: 'background persistent process',score: 60 },
-    { pattern: /\/dev\/null\s*2>&1/i,                                      label: 'hidden output',               score: 30 },
-    { pattern: /\/tmp\/\.[a-z0-9]+\.(py|sh|rb|js)/i,                      label: 'hidden temp file execution',  score: 75 },
-    { pattern: /(rm\s+-f\s+\/tmp|unlink\s+\/tmp)/i,                       label: 'self-deleting payload',       score: 70 },
-    { pattern: /~\/\.ssh\//i,                                              label: 'SSH key access',              score: 80 },
-    { pattern: /~\/\.aws\//i,                                              label: 'AWS credentials access',      score: 80 },
-    { pattern: /osascript\s+-e/i,                                          label: 'osascript execution (macOS)', score: 65 },
-    { pattern: /security\s+(unlock-keychain|dump-keychain)/i,              label: 'macOS keychain access',       score: 95 },
-    { pattern: /trycloudflare\.com|ngrok\.io|serveo\.net/i,                label: 'known tunneling service URL', score: 70 },
-    { pattern: /xargs\s+curl|xargs\s+wget/i,                              label: 'chained network request',     score: 55 },
+    // Fetch remote content and pipe directly into a shell interpreter
+    { pattern: /(curl|wget)\s+.+\|\s*(bash|sh|zsh|ash|dash|python\d*|node|perl|ruby)/i, label: 'remote pipe to shell', score: 90 },
+
+    // Decode base64 blob and execute — classic in-memory payload delivery
+    { pattern: /base64\s+-d.+\|\s*(bash|sh|zsh|python\d*|node|perl|ruby)/i, label: 'base64 decode and execute', score: 85 },
+
+    // Access known credential directories
+    { pattern: /~\/\.(ssh|aws|gcp|kube|gnupg)\//i, label: 'credential directory access', score: 80 },
+
+    // Access Unix system credential files
+    { pattern: /\/etc\/(passwd|shadow|sudoers)/i, label: 'system credential file access', score: 85 },
+
+    // Execute a hidden (dot-prefixed) file dropped in /tmp
+    { pattern: /\/tmp\/\.[^\s]+\.(sh|py|rb|js|pl)/i, label: 'hidden temp file execution', score: 75 },
+
+    // Write to cron or init systems to persist across reboots
+    { pattern: /(crontab\s+-[eli]|\/etc\/cron\.|LaunchAgents|\.config\/systemd)/i, label: 'persistence mechanism', score: 80 },
+
+    // Script deletes itself after running to hinder forensics
+    { pattern: /rm\s+(-rf?\s+)?["']?\$0["']?|unlink\s+["']?\$0["']?/i, label: 'self-deleting script', score: 75 },
   ];
 
   analyzeSettings(request: AnalyzeSettingsRequestDto): AnalyzeSettingsResponseDto {

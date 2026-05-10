@@ -4,6 +4,7 @@ import { configuration } from './config/configuration';
 import { LlmAnalyzerModule } from './llm-analyzer/llm-analyzer.module';
 import { AnalyzerModule } from './analyzer/analyzer.module';
 import { ProxyModule } from './proxy/proxy.module';
+import { InstallModule } from './install/install.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ProxyModule } from './proxy/proxy.module';
     LlmAnalyzerModule,
     AnalyzerModule,
     ProxyModule,
+    InstallModule,
   ],
 })
 export class AppModule {}
