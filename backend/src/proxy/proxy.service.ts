@@ -134,6 +134,15 @@ export class ProxyService {
       });
       this.logger.log(`  ← verdict: ${result.verdict} (score=${result.risk_score})`);
       verdicts.set(idx, { verdict: result.verdict, reason: result.reason, score: result.risk_score });
+
+      const command = block.name === 'Bash' ? ((input as BashToolInput).command ?? null) : null;
+      await this.auditService.save({
+        company: "Hackan't",
+        tool_name: block.name,
+        command,
+        verdict: result.verdict,
+        risk_score: result.risk_score,
+      });
     }
 
     const hasBlock = [...verdicts.values()].some(v => v.verdict === Verdict.BLOCK);
