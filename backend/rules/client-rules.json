@@ -1,0 +1,34 @@
+{
+  "rules": [
+    {
+      "id": "no_prod_db",
+      "label": "Production DB connection string",
+      "pattern": "postgres://[^\\s]*prod|mysql://[^\\s]*prod|mongodb://[^\\s]*prod",
+      "score": 85
+    },
+    {
+      "id": "no_stripe_live_key",
+      "label": "Stripe live API key exposure",
+      "pattern": "sk_live_[a-zA-Z0-9]{20,}",
+      "score": 90
+    },
+    {
+      "id": "no_drop_prod_table",
+      "label": "DROP TABLE on production schema",
+      "pattern": "DROP\\s+TABLE\\s+(IF\\s+EXISTS\\s+)?[`\"']?\\w*prod\\w*[`\"']?",
+      "score": 80
+    },
+    {
+      "id": "no_etc_shadow",
+      "label": "Sensitive system file access",
+      "pattern": "/etc/(shadow|passwd|sudoers|ssh/sshd_config)",
+      "score": 85
+    },
+    {
+      "id": "no_vault_prod_secrets",
+      "label": "Vault production secrets read",
+      "pattern": "vault\\s+(kv\\s+get|read)\\s+[^\\s]*secret[^\\s]*/prod",
+      "score": 80
+    }
+  ]
+}
