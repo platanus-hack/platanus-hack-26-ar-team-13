@@ -14,6 +14,7 @@ import { ProxyService } from './proxy.service';
 @Controller('v1')
 export class ProxyController {
   private readonly logger = new Logger(ProxyController.name);
+
   constructor(private readonly proxyService: ProxyService) {}
 
   /**
@@ -27,15 +28,9 @@ export class ProxyController {
    * If the Authorization header is provided (Bearer <key>), it overrides the
    * ANTHROPIC_API_KEY from config — useful when each client has its own key.
    *
-   * @param body        - Anthropic CreateMessage request body
-   * @param authHeader  - Optional "Bearer sk-ant-..." header
+   * @param body - Anthropic CreateMessage request body
+   * @param allHeaders - All request headers (filtered in service)
    * @returns Modified Anthropic Message response (tool_use blocks analyzed)
-   *
-   * @example
-   * POST /v1/messages
-   * Authorization: Bearer sk-ant-...
-   * { "model": "claude-sonnet-4-6", "max_tokens": 1024,
-   *   "messages": [{ "role": "user", "content": "list files in /" }] }
    */
   @Post('messages')
   async messages(

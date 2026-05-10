@@ -78,7 +78,7 @@ export class LlmAnalyzerService {
     // Always call the real Anthropic API (not the proxy) to avoid recursion
     this.anthropic = new Anthropic({
       apiKey,
-      baseURL: 'https://api.anthropic.com',
+      baseURL: this.configService.get<string>('ANTHROPIC_BASE_URL') ?? 'https://api.anthropic.com',
     });
   }
 
